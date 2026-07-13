@@ -1,0 +1,5 @@
+data/
+*.seeds.json
+mnist.pop.json
+/tmp/
+loom_seed_mnist
