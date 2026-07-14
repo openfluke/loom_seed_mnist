@@ -15,15 +15,21 @@ import (
 type TrainMode string
 
 const (
-	ModeWarmth   TrainMode = "warmth"    // single genome · warm-bit hill-climb
-	ModeDNA      TrainMode = "dna"       // clustered multi-seed DNA attract (all layers)
-	ModeDNALayer TrainMode = "dna-layer" // DNA clusters · one layer seed at a time
+	ModeWarmth        TrainMode = "warmth"         // single genome · warm-bit hill-climb
+	ModeDNA           TrainMode = "dna"            // clustered multi-seed DNA attract (all layers)
+	ModeDNALayer      TrainMode = "dna-layer"      // DNA clusters · one layer seed at a time
+	ModeCascade       TrainMode = "dna-cascade"    // L0-heavy → expand free-set → warmth polish
+	ModeMicroFountain TrainMode = "micro-fountain" // regional micro seeds → LT → mega
 )
 
 const popCheckpointFile = "mnist.pop.json"
 
 func resolveTrainMode() TrainMode {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_SEED_MNIST_MODE"))) {
+	case "micro-fountain", "micro", "fountain", "mega", "5":
+		return ModeMicroFountain
+	case "dna-cascade", "cascade", "hybrid", "4":
+		return ModeCascade
 	case "dna-layer", "dnalayer", "layer", "coord", "coordinate":
 		return ModeDNALayer
 	case "dna", "neat", "pop", "population", "cluster":
@@ -45,6 +51,10 @@ func SetTrainMode(m TrainMode) {
 		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "dna")
 	case ModeDNALayer:
 		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "dna-layer")
+	case ModeCascade:
+		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "dna-cascade")
+	case ModeMicroFountain:
+		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "micro-fountain")
 	default:
 		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "warmth")
 	}
@@ -68,22 +78,22 @@ func SetContinue(on bool) {
 /*
 Clustered DNA attract (seeds-only):
 
-  K independent clusters explore in parallel.
-  Each cluster has its own elite e*_k and local population.
-  Periodically: migrate elites across clusters (island model).
+	K independent clusters explore in parallel.
+	Each cluster has its own elite e*_k and local population.
+	Periodically: migrate elites across clusters (island model).
 
-  Per genome g in cluster k:
-    W=HeInit(s) → DNA=Normalize(W) → F=softFitness
-    overlap_local = DNA cosine vs e*_k
-    gap = max(0, F(g)-F(e*_k)) / (F(e*_k)+ε)
+	Per genome g in cluster k:
+	  W=HeInit(s) → DNA=Normalize(W) → F=softFitness
+	  overlap_local = DNA cosine vs e*_k
+	  gap = max(0, F(g)-F(e*_k)) / (F(e*_k)+ε)
 
-    # ANTI-COLLAPSE: when cluster mean pairwise DNA cosine → 1, crank μ
-    α = clip(0.10 + 0.55·gap + 0.20·(1-overlap), 0, 0.85)
-    μ = clip(0.03 + 0.20·(1-overlap) + 0.25·collapse, 0.02, 0.35)
+	  # ANTI-COLLAPSE: when cluster mean pairwise DNA cosine → 1, crank μ
+	  α = clip(0.10 + 0.55·gap + 0.20·(1-overlap), 0, 0.85)
+	  μ = clip(0.03 + 0.20·(1-overlap) + 0.25·collapse, 0.02, 0.35)
 
-    s′ = s ⊕ ((s ⊕ e*_k) ∧ M_α) ⊕ M_μ
-    + fresh immigrants when collapse > 0.9
-    + hall-of-fame kept by full-val accuracy (stable, not batch soft)
+	  s′ = s ⊕ ((s ⊕ e*_k) ∧ M_α) ⊕ M_μ
+	  + fresh immigrants when collapse > 0.9
+	  + hall-of-fame kept by full-val accuracy (stable, not batch soft)
 */
 func printDNAAttractEquation() {
 	fmt.Println(`

@@ -184,6 +184,22 @@ func runTrain(root, path, dataDir string, cont bool) bool {
 		}
 		seeds, net = res.Seeds, res.Net
 		method = "dna-layer-coord"
+	case ModeCascade:
+		res, err := trainDNACascade(root, topo, sizes, dtypes, initSeeds, ds.Train, ds.Val, resumeSeeds)
+		if err != nil {
+			fmt.Printf("  FAIL dna-cascade: %v\n", err)
+			return false
+		}
+		seeds, net = res.Seeds, res.Net
+		method = "dna-cascade-v1"
+	case ModeMicroFountain:
+		res, err := trainMicroFountain(root, topo, sizes, dtypes, initSeeds, ds.Train, ds.Val, resumeSeeds)
+		if err != nil {
+			fmt.Printf("  FAIL micro-fountain: %v\n", err)
+			return false
+		}
+		seeds, net = res.Seeds, res.Net
+		method = "micro-fountain-v1"
 	default:
 		net, err = poly.BuildDenseVolumetricFromManifest(manifest)
 		if err != nil {

@@ -17,7 +17,9 @@ for arg in "$@"; do
     1|warmth|warm|--warmth|-w) MODE=warmth ;;
     2|dna|neat|pop|cluster|--dna|-d) MODE=dna ;;
     3|dna-layer|layer|coord|--dna-layer) MODE=dna-layer ;;
-    continue|--continue|-c) CONT=1; MODE="${MODE:-dna}" ;;
+    4|dna-cascade|cascade|hybrid|--dna-cascade) MODE=dna-cascade ;;
+    5|micro-fountain|micro|fountain|mega|--micro-fountain) MODE=micro-fountain ;;
+    continue|--continue|-c) CONT=1; MODE="${MODE:-micro-fountain}" ;;
     fresh|--fresh) rm -f "$SEED_FILE" "$POP_FILE"; CONT= ;;
   esac
 done
@@ -30,9 +32,11 @@ fi
 if [[ -f "$SEED_FILE" && -z "$CONT" && -z "$MODE" ]]; then
   echo
   echo "Saved $SEED_FILE found:"
-  echo "  [1] reload only"
-  echo "  [2] continue search"
-  echo "  [3] fresh train (delete seeds + pop, then pick mode)"
+  echo "  [1] reload only     — no search"
+  echo "  [2] continue search — keep seeds, then pick train mode"
+  echo "  [3] fresh train     — wipe seeds/pop, then pick train mode"
+  echo
+  echo "  (train modes incl. [5] micro-fountain appear on the NEXT screen after 2 or 3)"
   echo -n "Choice [1]: "
   read -r ACT || ACT=1
   case "${ACT:-1}" in
@@ -54,15 +58,20 @@ fi
 if [[ -z "$MODE" ]]; then
   echo
   echo "Train mode:"
-  echo "  [1] warmth    — single genome · warm-bit hill-climb"
-  echo "  [2] dna       — clustered DNA · all layers at once"
-  echo "  [3] dna-layer — clustered DNA · one layer at a time"
-  echo -n "Choice [1]: "
-  read -r CHOICE || CHOICE=1
-  case "${CHOICE:-1}" in
+  echo "  [1] warmth         — single genome · warm-bit hill-climb"
+  echo "  [2] dna            — clustered DNA · all layers at once"
+  echo "  [3] dna-layer      — clustered DNA · one layer at a time"
+  echo "  [4] dna-cascade    — L0-heavy → expand free-set → warmth"
+  echo "  [5] micro-fountain — per-digit micro → LT consolidate → mega  ← new"
+  echo -n "Choice [5]: "
+  read -r CHOICE || CHOICE=5
+  case "${CHOICE:-5}" in
+    1|warmth) MODE=warmth ;;
     2|dna|DNA|neat) MODE=dna ;;
     3|dna-layer|layer) MODE=dna-layer ;;
-    *) MODE=warmth ;;
+    4|dna-cascade|cascade|hybrid) MODE=dna-cascade ;;
+    5|micro-fountain|micro|fountain|mega|"") MODE=micro-fountain ;;
+    *) MODE=micro-fountain ;;
   esac
 fi
 
@@ -86,7 +95,8 @@ fi
 echo
 echo "done"
 echo "tips:"
-echo "  ./run.sh 3                 # dna-layer (one layer at a time)"
-echo "  ./run.sh dna-layer"
-echo "  ./run.sh continue          # resume (then pick mode if needed)"
-echo "  ./run.sh fresh 3           # wipe + dna-layer"
+echo "  ./run.sh 5                 # micro-fountain (regional micro → LT → mega)"
+echo "  ./run.sh fresh 5           # wipe + micro-fountain"
+echo "  ./run.sh 4                 # dna-cascade"
+echo "  ./run.sh continue          # resume"
+echo "  ./run.sh fresh dna-layer"

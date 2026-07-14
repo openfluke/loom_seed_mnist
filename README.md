@@ -13,15 +13,16 @@ Save/reload is therefore a tiny JSON of seeds (~hundreds of bytes), not a weight
 ```bash
 cd loom_seed_mnist
 ./run.sh                 # menus for mode / reload / continue
-./run.sh dna             # fresh clustered DNA search
-./run.sh warmth
+./run.sh 5               # micro-fountain (per-digit micro → LT → mega)
+./run.sh fresh 5         # wipe seeds/pop + micro-fountain
+./run.sh 4               # dna-cascade
 ./run.sh continue        # RESUME search from mnist.seeds.json + mnist.pop.json
-./run.sh fresh dna       # wipe seeds/pop and retrain
 LOOM_SEED_MNIST_QUICK=1 ./run.sh continue
 ```
 
 **Important:** a plain second `./run.sh` only **reloads** (no more searching).  
-To pick up where DNA left off: `./run.sh continue` (or choose `[2] continue` in the menu).
+To pick up where DNA left off: `./run.sh continue` (or choose `[2] continue` in the menu).  
+First menu is only reload/continue/fresh — train mode **[5]** is on the **next** screen (or pass `5` on the CLI).
 
 ---
 
@@ -59,9 +60,10 @@ Network (fixed for the PoC):
 
 ---
 
-## Three search modes
+## Five search modes
 
 `./run.sh` asks which algorithm to use (after optional reload/continue/fresh).
+Default interactive choice is **[5] micro-fountain**.
 
 ### [1] warmth — single genome · warm-bit hill-climb
 
@@ -99,22 +101,56 @@ checkpoint → mnist.pop.json every generation
 
 Coordinate ascent: freeze `s_j` for `j≠ℓ`, run DNA clusters that only search `s_ℓ`, then advance to the next layer each round. Same attract/immigrant math; narrower gene edits.
 
+### [4] dna-cascade — L0-heavy → expand free-set → warmth (new)
+
+Hybrid that uses more of Loom’s DNA surface than [2]/[3]:
+
+```text
+Phase A  DNA islands search ONLY s₀ (heavy gens) — L0 was the only mover under [3]
+Phase B  expand free-set {s₀,s₁} then {s₀,s₁,s₂}
+         α/μ from CompareNetworks.LayerOverlaps per free layer (not OverallOverlap)
+Phase C  warmth-bit polish on hall-of-fame; keep only if full val improves
+```
+
+Still on-manifold (`layer_seed → HeInit`). Aim: beat the ~18.3% dna-layer val record.
+
+### [5] micro-fountain — per-digit micro → LT consolidate → mega
+
+**No SGD.** Still seed-search + loom poly LT weight transport:
+
+```text
+for burst r = 1…R (default 3):
+  μ) for digit c ∈ 0…9:
+       short DNA islands scoring soft-fitness on class-c samples (+ small mix)
+       keep into shared seed HOF only if full val rises (or micro-accept)
+  seed-vote) majority bit-vote across the 10 regional genomes (on-manifold)
+  κ) Pack(HeInit(s*_c)) → RecoverWeightBlobs → ensemble ForwardArgmax  (L1)
+             stashes an L1 Master cargo
+Μ) Level-2 RecoverWeightBlobs over padded L1 cargos → mega zoo ensemble
+
+seeds.json = best seed-manifold genome (deployable HeInit)
+fountain   = experimental weight-space ensemble (may leave seed manifold)
+```
+
+Does **not** call `poly.NeuralFountain` / `poly.Train`. Fountain codes only spray/peel already-packed HeInit blobs.
+
 ---
 
 ## Env knobs
 
 | Env | Effect |
 |-----|--------|
-| `LOOM_SEED_MNIST_MODE=warmth\|dna\|dna-layer` | Select algorithm |
+| `LOOM_SEED_MNIST_MODE=warmth\|dna\|dna-layer\|dna-cascade\|micro-fountain` | Select algorithm |
 | `LOOM_SEED_MNIST_CONTINUE=1` | Resume from seeds + pop checkpoint |
 | `LOOM_SEED_MNIST_QUICK=1` | Fewer epochs/gens, smaller batches |
 | `LOOM_SEED_MNIST_EPOCHS` | Warmth epoch count |
 | `LOOM_SEED_MNIST_MUT` | Warmth mutations per layer |
 | `LOOM_SEED_MNIST_CLUSTERS` | DNA cluster count |
-| `LOOM_SEED_MNIST_GEN` | DNA generations (or gens/layer for dna-layer) |
+| `LOOM_SEED_MNIST_GEN` | DNA generations (affects micro gens too) |
+| `LOOM_SEED_MNIST_BURSTS` | micro-fountain burst rounds |
 | `LOOM_SEED_MNIST_ROUNDS` | dna-layer outer rounds |
 
-CLI: `go run . --dna` / `--dna-layer` / `--warmth` / `--continue`.
+CLI: `go run . --mode=micro-fountain` / `-5` / `--dna-cascade` / `--dna-layer` / `--dna` / `--warmth` / `--continue`.
 
 ---
 
@@ -225,13 +261,40 @@ Setup: `3 rounds × 3 layers`, `K=3 × 5` genomes per focus, **8 gens per layer*
 5. **Heatmaps:** BEFORE Q 39.6 / 10%; after R1 Q 44.5 / 17%; after R2–3 Q 41.2 / 18% (quality can wobble while class acc rises). Comparison table: trained beats init on both splits.
 6. **Vs [2]:** All-layers DNA ~18.8% with three movable seeds; dna-layer ~18.3% with effectively one seed moved. Similar ceiling, clearer *which*-seed story.
 
+### [5] micro-fountain (3 bursts · full digits) — regional micro + LT + mega
+
+Setup: `R=3` bursts, per digit `8` gens · free **L0 only**, regional fitness ~441 samples, LT loss 30%. Dense `784→128→64→10`. **No backprop.**
+
+| Checkpoint | Metric | Notes |
+|------------|--------|-------|
+| Start | seed hof **9.45%** · slice ~10.2% | topology init |
+| Burst 1 · digit 1 | seed hof → **16.73%** | ones specialist (regAcc ~76%); easy digit moves HOF first |
+| Burst 1 · later digits | many `held` | sequential HOF gate: later digits rarely beat full val |
+| Burst 1 · seed-vote | **16.73%** (held vs later HOF) | majority bit-vote of regionals can *hurt* |
+| Burst 1 · κ L1 fountain | ensemble **19.89%** vs seed ~19.02% | first real fountain lift (~+0.9 pts) |
+| Burst 2 · κ L1 | ensemble **18.69%** vs seed **19.39%** | averaging correlated cousins can go *down* |
+| Burst 3 · digits 6–9 | soft↓ / batchAcc↑ on region, full held | e.g. digit 7 batchAcc ~70% but regAcc on val ~21%; digit 8 ~50% batch / 33% reg — skill exists, not kept in shared HOF |
+| Burst 3 · κ L1 | ensemble **19.39%** = seed hof | flat |
+| Μ mega (3 cargos) | ensemble ≈ **19.73%** (4k val) | best L1 fountain still **19.89%**; mega ≈ same regime |
+| Final seed save | train **19.66%** / val **19.39%** | method `micro-fountain-v1` |
+| Slice heatmap AFTER | val-slice **18.8%**, Q 45.3 | init→trained clear over chance |
+| Genes that moved | **only L0 `*`** · L1/L2 still topology init | same ablation story as [3]/[4] |
+
+**Reading:**
+
+1. **Seed HOF beat the old ~18.3% record** (~**19.4%** full val). Mode [5] is a real seed searcher, not just fountain theater — and again **only `s0` changed**.
+2. **Fountain helped once, modestly.** Best ensemble **19.89%** vs seed **19.02%** on burst 1. Burst 2 went *below* seed; mega landed ~**19.7%**. So LT consolidate-the-consolidations works as transport + soft blend, but is **not a second leap** off a ~20% seed ceiling.
+3. **Sequential one-genome HOF starves specialists.** Digits like 7/8 show strong regional soft/batchAcc while `· held` on full val and low/medium `regAcc`. Regionals packed into L1 are often close cousins of the ones/global HOF → ensemble ≈ best member (or slightly worse). Majority seed-vote similarly failed to beat HOF.
+4. **What would make fountain matter more:** keep a **true per-digit champion** (parallel region HOFs), pack *those*, then ensemble / gate / route — not overwrite one shared genome as you walk 0→9.
+5. **Still no SGD.** Same ballpark as [2]/[3]/[4]. Fountain codes here recombine HeInit weight blobs; they do not train.
+
 ---
 
 ## Thoughts (honest)
 
 1. **It “trains,” barely.** Chance (~10%) → ~19% with **three integers** is a real but tiny lift. Same MLP with backprop would crush 95%+.
 
-2. **Seed space ≠ weight space.** He-init recipes are a tiny manifold. You’re searching recipes, not sculpting weights.
+2. **Seed space ≠ weight space.** He-init recipes are a tiny manifold. You’re searching recipes, not sculpting weights. Averaging packed recipes (fountain) only moves the needle when the recipes are *diverse specialists*.
 
 3. **Warmth** = local compass on one genome; goes cold when 1-bit probes stop helping.
 
@@ -239,9 +302,11 @@ Setup: `3 rounds × 3 layers`, `K=3 × 5` genomes per focus, **8 gens per layer*
 
 5. **dna-layer [3] is the ablation mode.** Full run: only `s0` ever UPDATED; `s1`/`s2` held across all rounds. Trust `hof val` / `UPDATED`, ignore flashy `batchAcc`. R3 plateau ≈ same accuracy regime as [2].
 
-6. **DeviationMetrics** is for humans; soft/hof for search. Don’t optimize the heatmap buckets directly.
+6. **micro-fountain [5]** pushes seed HOF slightly past [2]/[3] (~19.4%) and shows LT can recover regional packs + give a small ensemble bump once (~19.9%). Mega didn’t unlock a new regime. Bottleneck is **shared sequential HOF**, not LT peel failing (10/10 and 3/3 recovered).
 
-7. **Portable recipe, not ImageNet.** Seeds-only + DNA compare + heatmaps is a coherent Loom demo stack. Competitive MNIST needs a richer genome (CNN seeds, more seeds, or actual `poly.Train`).
+7. **DeviationMetrics** is for humans; soft/hof for search. Don’t optimize the heatmap buckets directly.
+
+8. **Portable recipe, not ImageNet.** Seeds-only + DNA compare + heatmaps (+ optional LT combo) is a coherent Loom demo stack. Competitive MNIST needs a richer genome (CNN seeds, more seeds, or actual `poly.Train` / NeuralFountain *specialize*).
 
 ---
 
@@ -254,6 +319,8 @@ loom_seed_mnist/
     download.go data.go train.go warmth.go
     dna_pop.go      # [2] clustered DNA + checkpoint
     dna_layer.go    # [3] coordinate DNA (one layer at a time)
+    dna_cascade.go  # [4] L0-heavy → expand free-set → warmth
+    dna_micro.go    # [5] micro seeds → L1 LT → mega
     run.go
   data/  mnist.seeds.json  mnist.pop.json
 ```
@@ -262,7 +329,7 @@ loom_seed_mnist/
 
 ## Bottom line
 
-> You can move MNIST accuracy with only Loom `layer_seed` → He-init weights, and show it with DeviationMetrics.
+> You can move MNIST accuracy with only Loom `layer_seed` → He-init weights, and show it with DeviationMetrics. Fountain codes can soft-combine those recipes, but only help a little unless the micro genomes stay diverse.
 
 | Mode | Peak-ish full val (PoC) | What we learned |
 |------|-------------------------|-----------------|
@@ -270,3 +337,5 @@ loom_seed_mnist/
 | dna v1 | ~18% then freeze | population clones (`cosine=1`) |
 | dna [2] clusters | **~18.8%** while diverse | hof > soft; islands work |
 | dna-layer [3] | **9.5% → 17.4% → 18.3%** then plateau | **only L0 seed changed**; L1/L2 held |
+| dna-cascade [4] | ~18.3% (record before [5]) | L0-heavy + LayerOverlaps; still L0-dominated |
+| micro-fountain [5] | seed **~19.4%** · L1 ensemble **~19.9%** · mega **~19.7%** | seed beat ~18.3%; fountain +0.5–1 pt once; sequential HOF kills specialist diversity |
