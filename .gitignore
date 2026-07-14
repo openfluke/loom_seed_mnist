@@ -3,3 +3,4 @@ data/
 mnist.pop.json
 /tmp/
 loom_seed_mnist
+docs/
