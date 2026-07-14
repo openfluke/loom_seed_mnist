@@ -104,7 +104,7 @@ func trainDNACascade(
 			continue
 		}
 		fmt.Printf("\n══ Phase B · free layers %v · %d gens ══\n", free, midCfg.Generations)
-		best, v, g, err := dnaSearchFreeSet(
+		best, v, _, g, err := dnaSearchFreeSet(
 			root, topo, sizes, dtypes, seeds, free, train, val, midCfg, rng, &globalGen,
 		)
 		if err != nil {
@@ -176,17 +176,19 @@ func dnaSearchFreeSet(
 	cfg DNAPopConfig,
 	rng *poly.SeedRNG,
 	globalGen *int,
-) (bestSeeds []uint64, bestVal float64, gensRun int, err error) {
+) (bestSeeds []uint64, bestVal float64, packSeeds []uint64, gensRun int, err error) {
 	fitness := sampleSubset(train, cfg.FitnessBatch, rng)
 	base := append([]uint64(nil), baseSeeds...)
 	bestSeeds = append([]uint64(nil), base...)
+	packSeeds = append([]uint64(nil), base...)
 
 	baseNet, err := rebuildNet(topo, sizes, dtypes, base)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, nil, 0, err
 	}
 	bestVal = evalAccuracy(baseNet, val)
 	bestSoft := softFitness(baseNet, fitness)
+	packSoft := bestSoft
 	freeSet := map[int]bool{}
 	for _, li := range free {
 		freeSet[li] = true
@@ -208,7 +210,16 @@ func dnaSearchFreeSet(
 		}
 	}
 	if err := scorePopulation(pop, topo, sizes, dtypes, fitness); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, nil, 0, err
+	}
+	// Latch soft specialist immediately if a mutant already beats base on this fitness set.
+	{
+		bi := bestIndex(pop)
+		cand := freezeOutsideFreeCopy(pop[bi].seeds, base, freeSet)
+		if pop[bi].fit < packSoft-1e-12 {
+			packSoft = pop[bi].fit
+			packSeeds = cand
+		}
 	}
 
 	for gen := 1; gen <= cfg.Generations; gen++ {
@@ -216,7 +227,7 @@ func dnaSearchFreeSet(
 		gensRun++
 		fitness = sampleSubset(train, cfg.FitnessBatch, rng)
 		if err := scorePopulation(pop, topo, sizes, dtypes, fitness); err != nil {
-			return nil, 0, 0, err
+			return nil, 0, nil, 0, err
 		}
 
 		next := make([]dnaGenome, 0, len(pop))
@@ -271,7 +282,7 @@ func dnaSearchFreeSet(
 					}
 					childDNA, err := genomeDNA(topo, sizes, dtypes, child)
 					if err != nil {
-						return nil, 0, 0, err
+						return nil, 0, nil, 0, err
 					}
 					cmp := poly.CompareNetworks(childDNA, eliteDNA)
 					gap := math.Max(0, softFitnessMust(topo, sizes, dtypes, child, fitness)-elite.fit)
@@ -304,7 +315,7 @@ func dnaSearchFreeSet(
 				freezeOutsideFree(child, base, freeSet)
 				cnet, err := rebuildNet(topo, sizes, dtypes, child)
 				if err != nil {
-					return nil, 0, 0, err
+					return nil, 0, nil, 0, err
 				}
 				next = append(next, dnaGenome{
 					seeds:   child,
@@ -319,14 +330,14 @@ func dnaSearchFreeSet(
 			migrateClustersFree(pop, cfg.Clusters, free, base, rng)
 		}
 		if err := scorePopulation(pop, topo, sizes, dtypes, fitness); err != nil {
-			return nil, 0, 0, err
+			return nil, 0, nil, 0, err
 		}
 
 		bi := bestIndex(pop)
 		cand := freezeOutsideFreeCopy(pop[bi].seeds, base, freeSet)
 		candNet, err := rebuildNet(topo, sizes, dtypes, cand)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, nil, 0, err
 		}
 		candVal := evalAccuracy(candNet, val)
 		candSoft := softFitness(candNet, fitness)
@@ -336,9 +347,18 @@ func dnaSearchFreeSet(
 			bestSeeds = cand
 			fmt.Printf("  ★ free%v gen %d  val=%.2f%% soft=%.4f\n", free, gen, bestVal*100, bestSoft)
 		}
+		// Soft specialist for packing (mode 6): may diverge from full-val HOF.
+		if candSoft < packSoft-1e-12 {
+			packSoft = candSoft
+			packSeeds = cand
+			if math.Abs(candVal-bestVal) > 1e-6 {
+				fmt.Printf("  ◆ pack soft↑ gen %d  soft=%.4f fullVal=%.2f%% (hofVal=%.2f%%)\n",
+					gen, packSoft, candVal*100, bestVal*100)
+			}
+		}
 
-		fmt.Printf("  free%v gen %02d/%d  bestSoft=%.4f batchAcc=%.1f%% focusVal=%.2f%% imm=%d\n",
-			free, gen, cfg.Generations, pop[bi].fit, pop[bi].acc*100, bestVal*100, immigrants)
+		fmt.Printf("  free%v gen %02d/%d  bestSoft=%.4f batchAcc=%.1f%% focusVal=%.2f%% packSoft=%.4f imm=%d\n",
+			free, gen, cfg.Generations, pop[bi].fit, pop[bi].acc*100, bestVal*100, packSoft, immigrants)
 
 		_ = savePopCheckpoint(filepath.Join(root, popCheckpointFile), PopCheckpoint{
 			Format:     popFormat,
@@ -350,7 +370,7 @@ func dnaSearchFreeSet(
 			Genomes:    serializePop(pop),
 		})
 	}
-	return bestSeeds, bestVal, gensRun, nil
+	return bestSeeds, bestVal, packSeeds, gensRun, nil
 }
 
 func layerOverlapAt(cmp poly.NetworkComparisonResult, li int) float64 {

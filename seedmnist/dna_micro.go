@@ -330,7 +330,8 @@ func dnaSearchRegion(
 	globalGen *int,
 ) (bestSeeds []uint64, bestVal float64, gensRun int, err error) {
 	// Soft fitness on regional samples; HOF still tracks full val inside free-set search.
-	return dnaSearchFreeSet(root, topo, sizes, dtypes, baseSeeds, free, regionFit, val, cfg, rng, globalGen)
+	best, v, _, g, err := dnaSearchFreeSet(root, topo, sizes, dtypes, baseSeeds, free, regionFit, val, cfg, rng, globalGen)
+	return best, v, g, err
 }
 
 func filterLabel(samples []Sample, label int) []Sample {

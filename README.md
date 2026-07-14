@@ -13,16 +13,16 @@ Save/reload is therefore a tiny JSON of seeds (~hundreds of bytes), not a weight
 ```bash
 cd loom_seed_mnist
 ./run.sh                 # menus for mode / reload / continue
-./run.sh 5               # micro-fountain (per-digit micro → LT → mega)
-./run.sh fresh 5         # wipe seeds/pop + micro-fountain
-./run.sh 4               # dna-cascade
+./run.sh 6               # sample-fountain (sample shards → LT → mega)
+./run.sh fresh 6         # wipe + sample-fountain
+./run.sh 5               # micro-fountain (per-digit — weaker diversity)
 ./run.sh continue        # RESUME search from mnist.seeds.json + mnist.pop.json
 LOOM_SEED_MNIST_QUICK=1 ./run.sh continue
 ```
 
 **Important:** a plain second `./run.sh` only **reloads** (no more searching).  
 To pick up where DNA left off: `./run.sh continue` (or choose `[2] continue` in the menu).  
-First menu is only reload/continue/fresh — train mode **[5]** is on the **next** screen (or pass `5` on the CLI).
+First menu is only reload/continue/fresh — train mode **[6]** is on the **next** screen (or pass `6` on the CLI).
 
 ---
 
@@ -60,10 +60,10 @@ Network (fixed for the PoC):
 
 ---
 
-## Five search modes
+## Six search modes
 
 `./run.sh` asks which algorithm to use (after optional reload/continue/fresh).
-Default interactive choice is **[5] micro-fountain**.
+Default interactive choice is **[6] sample-fountain**.
 
 ### [1] warmth — single genome · warm-bit hill-climb
 
@@ -134,23 +134,63 @@ fountain   = experimental weight-space ensemble (may leave seed manifold)
 
 Does **not** call `poly.NeuralFountain` / `poly.Train`. Fountain codes only spray/peel already-packed HeInit blobs.
 
+### [6] sample-fountain — sample-shard micro → LT → mega (recommended vs [5])
+
+**Yes — partitioning by digit was the wrong slice.** Mode [5] showed ones locking a shared HOF; later digits mostly `held`. Mode [6] micro-explores on **random training sample shards** instead (not one genome walk over labels).
+
+Still no SGD. Thesis for beating ~19.7%:
+
+```text
+for burst r = 1…R (default 4):
+  μ) reshuffle train → K shards × N samples (default 12×256)
+     fitness = soft(mix(shard, global_anchor))   # stay a bit global
+     free-set expands: {0} → {0,1} → {0,1,2}
+     ALWAYS pack s*_i  (independent specialists — full-val HOF is separate)
+  seed) pairwise DNA-pull among top soft elites (not majority of all)
+  κ) Pack → RecoverWeightBlobs → full ensemble + soft-gated top-k
+  polish) warmth on seed HOF between bursts
+Μ) mega over L1 cargos
+```
+
+Not literal “one DNA search per MNIST row” (56k×DNA would be absurd) — shards *are* the sample micro-batches. Env: `LOOM_SEED_MNIST_SHARDS`, `LOOM_SEED_MNIST_SHARD_N`, `LOOM_SEED_MNIST_TOPK`, `LOOM_SEED_MNIST_BURSTS`.
+
+**Ideas baked in to push past ~19.7% barrier**
+
+| Idea | Why |
+|------|-----|
+| Sample shards not digits | Complementary packs instead of ones-locked cousins |
+| Pack-keep even when full val holds | Fountain gets diversity mode [5] threw away |
+| Mixed fitness (shard + anchor) | Specialists don’t fully forget the rest of MNIST |
+| Expand free layers over bursts | Leave the L0-only trap after burst 1 |
+| Soft-gated top-k ensemble | Drop weak cousins before averaging |
+| Pairwise elite pull | Better seed-side merge than bit-majority |
+| Warmth between bursts | Tried; soft≠full-val — always rejected/restored on this run |
+| Mega consolidate | Same “consolidate consolidations” loop as [5] |
+
+**PoC peak (full scored run):** seed HOF **~22%** · best L1 **~31%** · **mega ~34%**. Top-k gated trailed. See results section below.
+
+Still far from SGD. Further seed leaps need richer genome; further fountain leaps should **keep the best L1 cargo** and maybe skip warmth / bad bursts.
+
 ---
 
 ## Env knobs
 
 | Env | Effect |
 |-----|--------|
-| `LOOM_SEED_MNIST_MODE=warmth\|dna\|dna-layer\|dna-cascade\|micro-fountain` | Select algorithm |
+| `LOOM_SEED_MNIST_MODE=…\|sample-fountain` | Select algorithm |
 | `LOOM_SEED_MNIST_CONTINUE=1` | Resume from seeds + pop checkpoint |
 | `LOOM_SEED_MNIST_QUICK=1` | Fewer epochs/gens, smaller batches |
 | `LOOM_SEED_MNIST_EPOCHS` | Warmth epoch count |
 | `LOOM_SEED_MNIST_MUT` | Warmth mutations per layer |
 | `LOOM_SEED_MNIST_CLUSTERS` | DNA cluster count |
 | `LOOM_SEED_MNIST_GEN` | DNA generations (affects micro gens too) |
-| `LOOM_SEED_MNIST_BURSTS` | micro-fountain burst rounds |
+| `LOOM_SEED_MNIST_BURSTS` | micro/sample-fountain burst rounds |
+| `LOOM_SEED_MNIST_SHARDS` | sample-fountain shard count |
+| `LOOM_SEED_MNIST_SHARD_N` | samples per shard |
+| `LOOM_SEED_MNIST_TOPK` | soft-gated ensemble size |
 | `LOOM_SEED_MNIST_ROUNDS` | dna-layer outer rounds |
 
-CLI: `go run . --mode=micro-fountain` / `-5` / `--dna-cascade` / `--dna-layer` / `--dna` / `--warmth` / `--continue`.
+CLI: `./run.sh 6` / `go run . --mode=sample-fountain` / `-6` / `--continue`.
 
 ---
 
@@ -285,28 +325,58 @@ Setup: `R=3` bursts, per digit `8` gens · free **L0 only**, regional fitness ~4
 1. **Seed HOF beat the old ~18.3% record** (~**19.4%** full val). Mode [5] is a real seed searcher, not just fountain theater — and again **only `s0` changed**.
 2. **Fountain helped once, modestly.** Best ensemble **19.89%** vs seed **19.02%** on burst 1. Burst 2 went *below* seed; mega landed ~**19.7%**. So LT consolidate-the-consolidations works as transport + soft blend, but is **not a second leap** off a ~20% seed ceiling.
 3. **Sequential one-genome HOF starves specialists.** Digits like 7/8 show strong regional soft/batchAcc while `· held` on full val and low/medium `regAcc`. Regionals packed into L1 are often close cousins of the ones/global HOF → ensemble ≈ best member (or slightly worse). Majority seed-vote similarly failed to beat HOF.
-4. **What would make fountain matter more:** keep a **true per-digit champion** (parallel region HOFs), pack *those*, then ensemble / gate / route — not overwrite one shared genome as you walk 0→9.
+4. **What would make fountain matter more:** keep independent specialists for the pack — **mode [6] does the sample-shard version of this** (not digit labels).
 5. **Still no SGD.** Same ballpark as [2]/[3]/[4]. Fountain codes here recombine HeInit weight blobs; they do not train.
+
+### [6] sample-fountain (4 bursts · 12×256 shards) — full scored run
+
+Setup: `R=4`, `K=12` shards × `N=256` (+64 anchors), `6` gens/shard, LT loss 30%, soft-gated top-4. Free expands `{0}` → `{0,1}` → `{0,1,2}`. **No SGD.** Soft-pack latch fixed mid-design (`pack≠hof` vs HOF-clone bug).
+
+| Burst | Free | Seed HOF (full val) | L1 ensemble | Top-4 gated | Notes |
+|-------|------|---------------------|-------------|-------------|-------|
+| Start | — | **9.45%** | — | — | topology init |
+| **1** | `[0]` | **21.01%** (shard 4 ★) | **24.65%** ★ | 19.38% | first real pack diversity; gated *below* full avg |
+| **2** | `[0 1]` | 21.01% held | **16.94%** | 17.74% | miss — weak packFull specialists diluted avg |
+| **3** | `[0 1 2]` | 21.01% held | **30.91%** ★ | 19.20% | L1 peak before mega |
+| **4** | `[0 1 2]` | **21.97%** (shard 9 ★) | 26.58% | 17.50% | small seed lift; L1 below burst-3 |
+| Warmth ×4 | — | always **rejected** | — | — | soft↓ while full val crashed; restored HOF |
+| Pairwise pull | — | always held (~8–13%) | — | — | soft-elite mash ≠ full-val |
+| **Μ mega** | 4 cargos | recovered 4/4 | **≈33.98%** ★ | ≈25.60% | on 4k val; beat best L1 (30.91%) |
+
+Final line: `seed_train=21.82%  seed_val=21.97%  fountain_best=33.98%  gens≈288` · method `sample-fountain-v1`.  
+Saved JSON marks **all three** layer seeds `*` (unlike [3]/[5] L0-only). Slice heatmap AFTER ~20.7% val / ~21.6% train; init→trained clear over chance. Deployed `mnist.seeds.json` = seed HOF only — **not** the ~34% mega ensemble.
+
+**Reading:**
+
+1. **Beat the ~19.7% barrier on both paths.** Seed HOF **~22%**; fountain path **L1 ~31% → mega ~34%**. Sample shards + independent soft-pack + mega consolidate worked.
+2. **Mega earned vs L1.** 33.98% > 30.91% — consolidating consolidations helped once the cargos included a strong burst (esp. burst 3). Gated mega (~25.6%) still trailed full mega avg.
+3. **Seed deploy stays ~22%.** Reloadable HeInit recipe; the mid-30s accuracy is weight-space ensemble only.
+4. **Full ensemble ≫ top-k gated** on strong bursts (and mega). Gating dropped helpful “weak” specialists.
+5. **Burst 2 regression** still stands: opening free bits too early can dilute the pack.
+6. **Warmth polish was a time sink** — always rejected. Skip-worthy next time.
+7. **All three seeds moved** on the final HOF (burst 4 free `[0,1,2]` paid seed rent) — rare vs earlier L0-only ablations.
 
 ---
 
 ## Thoughts (honest)
 
-1. **It “trains,” barely.** Chance (~10%) → ~19% with **three integers** is a real but tiny lift. Same MLP with backprop would crush 95%+.
+1. **It “trains,” barely on seeds.** Chance (~10%) → ~22% with **three integers** is real but tiny. Same MLP with backprop would crush 95%+.
 
-2. **Seed space ≠ weight space.** He-init recipes are a tiny manifold. You’re searching recipes, not sculpting weights. Averaging packed recipes (fountain) only moves the needle when the recipes are *diverse specialists*.
+2. **Seed space ≠ weight space.** He-init recipes are a tiny manifold. **Fountain averaging of diverse HeInit packs** can leave that manifold’s accuracy — mode [6] L1 **~31%** — without SGD.
 
-3. **Warmth** = local compass on one genome; goes cold when 1-bit probes stop helping.
+3. **Warmth** = local soft compass; here it repeatedly destroyed full val and was restored. Soft≠argmax.
 
-4. **DNA clusters [2]** = right *shape* for Loom’s DNA/NEAT story: diverse islands, hof on full val, heatmaps move with hof.
+4. **DNA clusters [2]** = right *shape* for Loom’s DNA/NEAT story: diverse islands, hof on full val.
 
-5. **dna-layer [3] is the ablation mode.** Full run: only `s0` ever UPDATED; `s1`/`s2` held across all rounds. Trust `hof val` / `UPDATED`, ignore flashy `batchAcc`. R3 plateau ≈ same accuracy regime as [2].
+5. **dna-layer [3] / cascade [4]** = ablation: effectively **L0** moves the seed HOF.
 
-6. **micro-fountain [5]** pushes seed HOF slightly past [2]/[3] (~19.4%) and shows LT can recover regional packs + give a small ensemble bump once (~19.9%). Mega didn’t unlock a new regime. Bottleneck is **shared sequential HOF**, not LT peel failing (10/10 and 3/3 recovered).
+6. **micro-fountain [5]** (~19.4% seed / ~19.9% fountain): digit slices + sequential HOF starved the pack.
 
-7. **DeviationMetrics** is for humans; soft/hof for search. Don’t optimize the heatmap buckets directly.
+7. **sample-fountain [6]** (~22% seed / **~31% L1 / ~34% mega**): sample shards + soft-pack + mega worked. Top-k gate and warmth underperformed. Still no SGD. All three layer seeds moved on final HOF.
 
-8. **Portable recipe, not ImageNet.** Seeds-only + DNA compare + heatmaps (+ optional LT combo) is a coherent Loom demo stack. Competitive MNIST needs a richer genome (CNN seeds, more seeds, or actual `poly.Train` / NeuralFountain *specialize*).
+8. **DeviationMetrics** is for humans; soft/hof/fountain for search. Don’t optimize heatmap buckets directly.
+
+9. **Portable recipe, not ImageNet.** Next leaps: keep best L1 cargo (don’t average bad bursts into mega), skip warmth, or actually `poly.Train` / NeuralFountain specialize.
 
 ---
 
@@ -320,7 +390,8 @@ loom_seed_mnist/
     dna_pop.go      # [2] clustered DNA + checkpoint
     dna_layer.go    # [3] coordinate DNA (one layer at a time)
     dna_cascade.go  # [4] L0-heavy → expand free-set → warmth
-    dna_micro.go    # [5] micro seeds → L1 LT → mega
+    dna_micro.go    # [5] per-digit micro → L1 LT → mega
+    dna_sample.go   # [6] sample-shard micro → L1 LT → mega
     run.go
   data/  mnist.seeds.json  mnist.pop.json
 ```
@@ -329,13 +400,14 @@ loom_seed_mnist/
 
 ## Bottom line
 
-> You can move MNIST accuracy with only Loom `layer_seed` → He-init weights, and show it with DeviationMetrics. Fountain codes can soft-combine those recipes, but only help a little unless the micro genomes stay diverse.
+> Seeds-only search reaches ~22% val on this MLP. Sample-shard micro + LT ensemble reached **~31% L1 → ~34% mega** without backprop — still far from SGD, but fountain stacking finally moved.
 
-| Mode | Peak-ish full val (PoC) | What we learned |
-|------|-------------------------|-----------------|
-| warmth | ~15% | warm bits go cold |
+| Mode | Peak-ish (PoC) | What we learned |
+|------|----------------|-----------------|
+| warmth | ~15% val | warm bits go cold |
 | dna v1 | ~18% then freeze | population clones (`cosine=1`) |
-| dna [2] clusters | **~18.8%** while diverse | hof > soft; islands work |
-| dna-layer [3] | **9.5% → 17.4% → 18.3%** then plateau | **only L0 seed changed**; L1/L2 held |
-| dna-cascade [4] | ~18.3% (record before [5]) | L0-heavy + LayerOverlaps; still L0-dominated |
-| micro-fountain [5] | seed **~19.4%** · L1 ensemble **~19.9%** · mega **~19.7%** | seed beat ~18.3%; fountain +0.5–1 pt once; sequential HOF kills specialist diversity |
+| dna [2] clusters | **~18.8%** seed while diverse | hof > soft; islands work |
+| dna-layer [3] | **~18.3%** seed | **only L0** moved |
+| dna-cascade [4] | ~18.3% seed | L0-heavy + LayerOverlaps |
+| micro-fountain [5] | seed **~19.4%** · L1 **~19.9%** | digit HOF kills pack diversity |
+| sample-fountain [6] | seed **~22%** · L1 **~31%** · mega **~34%** · gated ~19–26% | sample shards + soft-pack + mega; full avg > top-k; warmth useless; all 3 seeds `*` |

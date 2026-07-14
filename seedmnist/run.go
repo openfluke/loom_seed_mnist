@@ -200,6 +200,14 @@ func runTrain(root, path, dataDir string, cont bool) bool {
 		}
 		seeds, net = res.Seeds, res.Net
 		method = "micro-fountain-v1"
+	case ModeSampleFountain:
+		res, err := trainSampleFountain(root, topo, sizes, dtypes, initSeeds, ds.Train, ds.Val, resumeSeeds)
+		if err != nil {
+			fmt.Printf("  FAIL sample-fountain: %v\n", err)
+			return false
+		}
+		seeds, net = res.Seeds, res.Net
+		method = "sample-fountain-v1"
 	default:
 		net, err = poly.BuildDenseVolumetricFromManifest(manifest)
 		if err != nil {

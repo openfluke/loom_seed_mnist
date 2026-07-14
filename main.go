@@ -25,6 +25,8 @@ func main() {
 			modeFlag = "dna-cascade"
 		case a == "--micro-fountain" || a == "-5" || a == "micro-fountain" || a == "micro" || a == "fountain":
 			modeFlag = "micro-fountain"
+		case a == "--sample-fountain" || a == "-6" || a == "sample-fountain" || a == "sample" || a == "shard":
+			modeFlag = "sample-fountain"
 		case a == "--continue" || a == "-c" || a == "continue":
 			contFlag = true
 		case strings.HasPrefix(a, "--mode="):
@@ -39,6 +41,8 @@ func main() {
 				modeFlag = "dna-cascade"
 			case "micro-fountain", "micro", "fountain", "mega":
 				modeFlag = "micro-fountain"
+			case "sample-fountain", "sample", "samples", "shard", "micro-sample":
+				modeFlag = "sample-fountain"
 			case "dna":
 				modeFlag = "dna"
 			case "warmth":
@@ -118,6 +122,8 @@ func pickExistingAction() string {
 
 func parseModeFlag(flag string) seedmnist.TrainMode {
 	switch strings.ToLower(flag) {
+	case "sample-fountain", "sample", "samples", "shard", "micro-sample", "6":
+		return seedmnist.ModeSampleFountain
 	case "micro-fountain", "micro", "fountain", "mega", "5":
 		return seedmnist.ModeMicroFountain
 	case "dna-cascade", "cascade", "hybrid", "4":
@@ -135,12 +141,13 @@ func parseModeFlag(flag string) seedmnist.TrainMode {
 
 func askTrainMode() seedmnist.TrainMode {
 	fmt.Println()
-	fmt.Println("[1] warmth         — single genome · warm-bit hill-climb")
-	fmt.Println("[2] dna            — clustered DNA · all layer seeds at once")
-	fmt.Println("[3] dna-layer      — clustered DNA · one layer seed at a time")
-	fmt.Println("[4] dna-cascade    — L0-heavy → expand free-set + LayerOverlaps → warmth")
-	fmt.Println("[5] micro-fountain — per-digit micro seeds → LT consolidate → mega")
-	fmt.Print("Choice [5]: ")
+	fmt.Println("[1] warmth          — single genome · warm-bit hill-climb")
+	fmt.Println("[2] dna             — clustered DNA · all layer seeds at once")
+	fmt.Println("[3] dna-layer       — clustered DNA · one layer seed at a time")
+	fmt.Println("[4] dna-cascade     — L0-heavy → expand free-set + LayerOverlaps → warmth")
+	fmt.Println("[5] micro-fountain  — per-digit micro → LT → mega")
+	fmt.Println("[6] sample-fountain — sample-shard micro → LT → mega  ← try beat ~19.7%")
+	fmt.Print("Choice [6]: ")
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
 	line = strings.TrimSpace(line)
@@ -153,9 +160,11 @@ func askTrainMode() seedmnist.TrainMode {
 		return seedmnist.ModeDNALayer
 	case "4", "dna-cascade", "cascade", "hybrid":
 		return seedmnist.ModeCascade
-	case "5", "micro-fountain", "micro", "fountain", "mega", "":
+	case "5", "micro-fountain", "micro", "fountain", "mega":
 		return seedmnist.ModeMicroFountain
+	case "6", "sample-fountain", "sample", "shard", "micro-sample", "":
+		return seedmnist.ModeSampleFountain
 	default:
-		return seedmnist.ModeMicroFountain
+		return seedmnist.ModeSampleFountain
 	}
 }

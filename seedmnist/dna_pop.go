@@ -15,17 +15,20 @@ import (
 type TrainMode string
 
 const (
-	ModeWarmth        TrainMode = "warmth"         // single genome · warm-bit hill-climb
-	ModeDNA           TrainMode = "dna"            // clustered multi-seed DNA attract (all layers)
-	ModeDNALayer      TrainMode = "dna-layer"      // DNA clusters · one layer seed at a time
-	ModeCascade       TrainMode = "dna-cascade"    // L0-heavy → expand free-set → warmth polish
-	ModeMicroFountain TrainMode = "micro-fountain" // regional micro seeds → LT → mega
+	ModeWarmth         TrainMode = "warmth"          // single genome · warm-bit hill-climb
+	ModeDNA            TrainMode = "dna"             // clustered multi-seed DNA attract (all layers)
+	ModeDNALayer       TrainMode = "dna-layer"       // DNA clusters · one layer seed at a time
+	ModeCascade        TrainMode = "dna-cascade"     // L0-heavy → expand free-set → warmth polish
+	ModeMicroFountain  TrainMode = "micro-fountain"  // per-digit micro → LT → mega
+	ModeSampleFountain TrainMode = "sample-fountain" // sample-shard micro → LT → mega
 )
 
 const popCheckpointFile = "mnist.pop.json"
 
 func resolveTrainMode() TrainMode {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_SEED_MNIST_MODE"))) {
+	case "sample-fountain", "sample", "samples", "shard", "micro-sample", "6":
+		return ModeSampleFountain
 	case "micro-fountain", "micro", "fountain", "mega", "5":
 		return ModeMicroFountain
 	case "dna-cascade", "cascade", "hybrid", "4":
@@ -55,6 +58,8 @@ func SetTrainMode(m TrainMode) {
 		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "dna-cascade")
 	case ModeMicroFountain:
 		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "micro-fountain")
+	case ModeSampleFountain:
+		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "sample-fountain")
 	default:
 		_ = os.Setenv("LOOM_SEED_MNIST_MODE", "warmth")
 	}
